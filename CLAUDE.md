@@ -1,5 +1,13 @@
 # JTI Promotion Scheduling POC
 
+## Instructions for Claude
+
+- After **any backend change**, run: `cd backend && ../.venv/Scripts/python.exe -m black . && ../.venv/Scripts/python.exe -m isort . && ../.venv/Scripts/python.exe -m flake8 .`
+  - Or via Makefile: `make be-lint`
+- After **any frontend change**, run: `cd frontend && npm run lint`
+  - Or via Makefile: `make fe-lint`
+- Fix all lint errors before considering a task complete.
+
 ## Project Structure
 
 ```

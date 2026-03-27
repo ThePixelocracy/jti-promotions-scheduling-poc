@@ -1,8 +1,8 @@
+from django.contrib.auth import authenticate
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.contrib.auth import authenticate
 
 
 @api_view(["POST"])
@@ -11,9 +11,7 @@ def login(request):
     username = request.data.get("username", "").strip()
     password = request.data.get("password", "")
     if not username or not password:
-        return Response(
-            {"error": "Username and password are required."}, status=400
-        )
+        return Response({"error": "Username and password are required."}, status=400)
     user = authenticate(username=username, password=password)
     if not user:
         return Response({"error": "Invalid credentials."}, status=401)
@@ -49,5 +47,10 @@ def me(request):
 @permission_classes([IsAuthenticated])
 def hello(request):
     return Response(
-        {"message": f"Hello, {request.user.username}! Welcome to JTI Promotion Scheduling."}
+        {
+            "message": (
+                f"Hello, {request.user.username}!"
+                " Welcome to JTI Promotion Scheduling."
+            )
+        }
     )
