@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -61,6 +61,27 @@ export default function ScheduleDetailPage() {
   const [genError, setGenError] = useState(null);
   const [aiSummary, setAiSummary] = useState(null);
   const [tokenUsage, setTokenUsage] = useState(null);
+
+  const [filterPos, setFilterPos] = useState("");
+  const [filterCity, setFilterCity] = useState("");
+  const [filterPromoter, setFilterPromoter] = useState("");
+
+  const filteredVisits = useMemo(() => {
+    const pos = filterPos.toLowerCase();
+    const city = filterCity.toLowerCase();
+    const promoter = filterPromoter.toLowerCase();
+    return visits.filter((v) => {
+      if (pos && !v.pos?.name?.toLowerCase().includes(pos)) return false;
+      if (city && !v.pos?.city?.toLowerCase().includes(city)) return false;
+      if (promoter) {
+        const full = v.promoter
+          ? `${v.promoter.first_name} ${v.promoter.last_name}`.toLowerCase()
+          : "";
+        if (!full.includes(promoter)) return false;
+      }
+      return true;
+    });
+  }, [visits, filterPos, filterCity, filterPromoter]);
 
   useEffect(() => {
     const headers = authHeaders();
@@ -254,14 +275,14 @@ export default function ScheduleDetailPage() {
 
             {tokenUsage && (
               <Tooltip
-                title={`Prompt: ${tokenUsage.prompt_tokens} · Completion: ${tokenUsage.completion_tokens}`}
+                title={`Prompt: ${tokenUsage.prompt_tokens.toLocaleString()} · Completion: ${tokenUsage.completion_tokens.toLocaleString()}`}
               >
                 <Typography
                   variant="caption"
                   color="text.secondary"
                   sx={{ display: "block", mt: 1.5, cursor: "default" }}
                 >
-                  {tokenUsage.total_tokens} tokens used
+                  {tokenUsage.total_tokens.toLocaleString()} tokens used
                 </Typography>
               </Tooltip>
             )}
@@ -272,7 +293,7 @@ export default function ScheduleDetailPage() {
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 1.5 }}>
               <Typography variant="subtitle2" color="text.secondary">
                 {visits.length > 0
-                  ? `${visits.length} visits`
+                  ? `${filteredVisits.length} of ${visits.length} visits`
                   : "No visits yet — generate a schedule to get started"}
               </Typography>
             </Box>
@@ -285,16 +306,61 @@ export default function ScheduleDetailPage() {
                       <TableCell>Week</TableCell>
                       <TableCell>Date</TableCell>
                       <TableCell>Time</TableCell>
-                      <TableCell>POS</TableCell>
-                      <TableCell>City</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                          <span>POS</span>
+                          <TextField
+                            size="small"
+                            placeholder="Filter…"
+                            value={filterPos}
+                            onChange={(e) => setFilterPos(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            sx={{ width: 130 }}
+                            slotProps={{ input: { sx: { fontSize: "0.75rem", py: 0.25 } } }}
+                          />
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                          <span>City</span>
+                          <TextField
+                            size="small"
+                            placeholder="Filter…"
+                            value={filterCity}
+                            onChange={(e) => setFilterCity(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            sx={{ width: 110 }}
+                            slotProps={{ input: { sx: { fontSize: "0.75rem", py: 0.25 } } }}
+                          />
+                        </Box>
+                      </TableCell>
                       <TableCell>Priority</TableCell>
-                      <TableCell>Promoter</TableCell>
+                      <TableCell>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
+                          <span>Promoter</span>
+                          <TextField
+                            size="small"
+                            placeholder="Filter…"
+                            value={filterPromoter}
+                            onChange={(e) => setFilterPromoter(e.target.value)}
+                            onClick={(e) => e.stopPropagation()}
+                            sx={{ width: 140 }}
+                            slotProps={{ input: { sx: { fontSize: "0.75rem", py: 0.25 } } }}
+                          />
+                        </Box>
+                      </TableCell>
                       <TableCell>Programme</TableCell>
                       <TableCell>Reason</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {visits.map((v) => {
+                    {filteredVisits.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} align="center" sx={{ py: 3, color: "text.secondary" }}>
+                          No visits match the current filters.
+                        </TableCell>
+                      </TableRow>
+                    ) : filteredVisits.map((v) => {
                       const d = new Date(v.date + "T00:00:00");
                       return (
                         <TableRow key={v.id} hover>

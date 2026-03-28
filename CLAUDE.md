@@ -51,32 +51,43 @@ jti-promotion-scheduling-poc/
 ├── .github/workflows/ci.yml
 ├── backend/
 │   ├── .venv/                        # Python 3.14, managed by uv
+│   ├── .env                          # gitignored — copy from .env.example
+│   ├── .env.example                  # documents required env vars
 │   ├── manage.py
 │   ├── setup.cfg                     # flake8 + isort config
 │   ├── pyproject.toml                # black config
 │   ├── config/                       # Django project settings, urls, wsgi, asgi
 │   ├── api/                          # Auth endpoints
-│   ├── scheduling/                   # Core domain models + admin
+│   ├── scheduling/                   # Core domain models, views, serializers, AI
+│   │   ├── ai.py                     # Prompt builder + OpenAI-compatible LLM call
 │   │   └── fixtures/initial_data.json
 │   ├── metrics/                      # POSMetrics model
 │   └── data_integration/             # CSV importers, DataSyncLog, admin Pull buttons
 │       └── sample_data/              # Sample CSVs for PoC demo
 └── frontend/
     ├── package.json
-    ├── vite.config.js                 # proxies /api → :8000
+    ├── vite.config.js                 # proxies /api → :8000; Vitest config
     ├── eslint.config.js
     └── src/
         ├── main.jsx
-        ├── App.jsx                    # Router + AuthProvider
+        ├── App.jsx                    # Router + AuthProvider + ThemeProvider
         ├── index.css                  # Global styles
-        ├── theme.js                   # JTI color tokens
-        ├── context/AuthContext.jsx    # JWT auth state, login/logout
+        ├── theme.js                   # JTI color tokens (used by LoginPage)
+        ├── muiTheme.js                # MUI dark theme with JTI tokens
+        ├── context/AuthContext.jsx    # JWT auth state, login/logout, authHeaders()
         ├── components/
-        │   ├── JtiLogo.jsx
-        │   └── ProtectedRoute.jsx
-        └── pages/
-            ├── LoginPage.jsx
-            └── HomePage.jsx
+        │   ├── JtiLogo.jsx            # Official JTI SVG logo
+        │   ├── ProtectedRoute.jsx
+        │   └── CreateScheduleDialog.jsx  # Stepper dialog — step 1: schedule params
+        ├── pages/
+        │   ├── LoginPage.jsx
+        │   ├── HomePage.jsx           # Schedule list + create button
+        │   └── ScheduleDetailPage.jsx # AI generation panel + visit table
+        └── test/
+            ├── setup.js               # jest-dom import
+            ├── handlers.js            # MSW request handlers + mock data
+            ├── HomePage.test.jsx
+            └── ScheduleDetailPage.test.jsx
 ```
 
 ---
@@ -100,15 +111,51 @@ backend/.venv/Scripts/Activate.ps1   # activate (PowerShell)
 - `djangorestframework-simplejwt` — JWT authentication
 - `django-cors-headers`
 - `openpyxl` — Excel reading (fixture/data generation scripts)
+- `openai` — OpenAI-compatible LLM client (works with OpenAI and Google AI Studio)
+- `python-dotenv` — loads `backend/.env` at startup
+
+### Environment variables
+
+Loaded from `backend/.env` (gitignored). Copy `backend/.env.example` to get started.
+
+| Variable | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | Yes | API key for the LLM provider |
+| `OPENAI_MODEL` | No | Model name (default: `gpt-4o-mini`) |
+| `OPENAI_BASE_URL` | No | Override base URL — set to Google AI Studio endpoint for free-tier use |
+
+**Google AI Studio (free tier):**
+```
+OPENAI_API_KEY=<key from https://aistudio.google.com/apikey>
+OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+OPENAI_MODEL=gemini-2.0-flash
+```
 
 ### Django apps
 
 | App | Responsibility |
 |---|---|
 | `api` | Auth endpoints: login, logout, me |
-| `scheduling` | Core domain models: PointOfSale, Promoter, Schedule, ScheduledVisit |
+| `scheduling` | Core domain models, REST API, AI schedule generation |
 | `metrics` | POSMetrics — time-windowed historical performance per POS |
 | `data_integration` | CSV importers + DataSyncLog; admin Pull buttons |
+
+### API endpoints
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/auth/login/` | POST | Returns access + refresh tokens |
+| `/api/auth/logout/` | POST | Blacklists refresh token |
+| `/api/auth/me/` | GET | Returns current username |
+| `/api/schedules/` | GET | List schedules (filter: `?status=Draft`) |
+| `/api/schedules/` | POST | Create schedule draft (sets status + created_by server-side) |
+| `/api/schedules/{id}/` | GET | Schedule detail |
+| `/api/schedules/{id}/visits/` | GET | All visits for a schedule (nested POS + Promoter) |
+| `/api/schedules/{id}/generate/` | POST | AI generation — clears existing visits, calls LLM, saves new visits |
+| `/api/pos/` | GET | Active POS list |
+| `/api/promoters/` | GET | Active promoters list |
+
+All endpoints require `IsAuthenticated`. Users created via Django Admin only.
 
 ### Authentication
 
@@ -116,14 +163,21 @@ JWT via `djangorestframework-simplejwt`:
 - Access token: **8 hours**
 - Refresh token: **7 days**, rotation + blacklist enabled
 
-| Endpoint | Method | Auth | Description |
-|---|---|---|---|
-| `/api/auth/login/` | POST | No | Returns access + refresh tokens |
-| `/api/auth/logout/` | POST | Yes | Blacklists refresh token |
-| `/api/auth/me/` | GET | Yes | Returns current username |
-| `/api/hello/` | GET | Yes | Hello world (protected) |
+### AI schedule generation — `scheduling/ai.py`
 
-All endpoints require `IsAuthenticated` by default. Users created via Django Admin only — no frontend registration.
+`POST /api/schedules/{id}/generate/` accepts:
+```json
+{ "optimization_goal": "sales * 10 + interviews", "user_prompt": "Maria X not available Apr 3-7" }
+```
+
+Flow:
+1. Aggregates `POSMetrics` into per-POS peak-window summaries (avg sales/interviews by time slot + day-of-week)
+2. Builds a structured prompt with schedule period, POS list, promoter list, optimization goal, and user constraints
+3. Calls the configured LLM with `response_format: json_object`
+4. Parses the response, clears existing `ScheduledVisit` records, saves new ones
+5. Returns `{ visits, summary, usage, errors }`
+
+`week_label` is computed from the visit date relative to `period_start`. AI reasoning is stored in the `comments` field of each `ScheduledVisit`.
 
 ### Linting
 
@@ -149,30 +203,31 @@ Key fields: `pos_type`, `priority` (Strategic/Prime/BaseLine/Developing), `addre
 #### `Promoter`
 All promoter types. Unique key: `username`.
 
-Key fields: `code` (nullable for Radical), `programme_type` (Permanent/Exclusive/Radical), `base_city` (nullable for Radical — data quality gap, will be filled via JTI infrastructure), `team` (SOUTH TEAM / NORTH TEAM, nullable for Radical), `is_active`.
+Key fields: `code` (nullable for Radical), `programme_type` (Permanent/Exclusive/Radical), `base_city` (nullable for Radical — data quality gap), `team` (SOUTH TEAM / NORTH TEAM, nullable for Radical), `is_active`.
 
 #### `Schedule`
 A planning period container. Lifecycle: `Draft → Published → Archived`.
 
+Key fields: `name`, `period_start`, `period_end`, `status`, `created_by`, `included_pos` (M2M), `included_promoters` (M2M).
+
 Constraints:
 - `period_end >= period_start`
 - **No overlapping schedules** — enforced in `clean()`
-- Periods are **arbitrary** (not fixed to month/week)
-- No historical data imported — DB starts fresh going forward
+- `included_pos` and `included_promoters` define the scope for AI generation
 
 #### `ScheduledVisit`
 One promoter visit to one POS within a schedule. Central fact record.
 
-Key fields: `schedule`, `promoter` (nullable for Radical until data integration), `pos`, `date`, `start_time`, `end_time`, `programme_type` (stored explicitly per visit), `out_of_premises`, `week_label`, `action` (blank = planned, not yet executed), `reason`, `comments`, `comments_meeting`.
+Key fields: `schedule`, `promoter` (nullable for Radical), `pos`, `date`, `start_time`, `end_time`, `programme_type`, `out_of_premises`, `week_label`, `action` (blank = planned), `reason`, `comments` (AI reasoning stored here), `comments_meeting`.
 
-Constraints: `end_time > start_time`, `date` must fall within `schedule` period.
+Constraints: `end_time > start_time`, `date` within `schedule` period.
 
 ---
 
 ### `metrics` app — `backend/metrics/models.py`
 
 #### `POSMetrics`
-Historical performance per POS broken down by **time window**. Used by the scheduling AI to detect peak times and prioritise visits.
+Historical performance per POS broken down by **time window**. Used by the AI to detect peak times and prioritise visits.
 
 Fields: `pos`, `reference_type`, `period_start`, `period_end`, `window_date`, `window_start`, `window_end`, `sales`, `interviews`.
 
@@ -197,19 +252,17 @@ All imports are **idempotent** (upsert). Each returns `{created, updated, skippe
 |---|---|---|
 | `promoters.py` | `username` | `scheduling.Promoter` |
 | `pos.py` | `cdb_code` | `scheduling.PointOfSale` |
-| `metrics.py` | `(pos, reference_type, period_start, period_end, window_date, window_start, window_end)` | `metrics.POSMetrics` |
+| `metrics.py` | 7-field composite key | `metrics.POSMetrics` |
 
-Metrics importer parses `period_start`, `period_end`, and `reference_type` from the filename automatically:
+Metrics importer parses `period_start`, `period_end`, and `reference_type` from the filename:
 `period_YYYY-MM-DD_YYYY-MM-DD_(previous_year|previous_month)_metrics.csv`
 
 #### Django Admin Pull buttons
 
-In Django Admin → **Data Sync Logs**, three buttons trigger imports from sample CSVs:
+In Django Admin → **Data Sync Logs**:
 - **↓ Pull Promoters**
 - **↓ Pull Points of Sale**
 - **↓ Pull Metrics**
-
-Each creates a `DataSyncLog` entry with counts and row-level errors.
 
 ---
 
@@ -224,7 +277,7 @@ Load with: `make be-loaddata`
 | `auth.User` (admin) | 1 | username: `admin`, password: `admin123!` |
 | `Promoter` (Permanent) | 19 | Real — from Excel `Personnel` sheet |
 | `Promoter` (Exclusive) | 27 | Real — from Excel `Personnel` sheet |
-| `Promoter` (Radical) | 8 | **Fake** — codes prefixed `RAD_`; real data pending JTI integration |
+| `Promoter` (Radical) | 8 | **Fake** — codes prefixed `RAD_`; real data pending |
 | `PointOfSale` | 50 | Real — from Excel `CDB List` sheet |
 
 ### Sample CSVs — `backend/data_integration/sample_data/`
@@ -244,7 +297,7 @@ Load with: `make be-loaddata`
 
 ## Frontend
 
-Framework: React 19 + Vite 6. Dev server at `:5173`, proxies `/api` → `:8000`.
+Framework: React 19 + Vite 6 + **MUI (Material UI) v7**. Dev server at `:5173`, proxies `/api` → `:8000`.
 
 ### Auth flow
 
@@ -252,23 +305,34 @@ Framework: React 19 + Vite 6. Dev server at `:5173`, proxies `/api` → `:8000`.
 2. `LoginPage` POSTs to `/api/auth/login/`
 3. Access + refresh tokens stored in `localStorage`
 4. `authHeaders()` injects `Authorization: Bearer <token>` on API calls
-5. Logout calls `/api/auth/logout/` and clears storage
+5. 401 response on any page → `logout()` → redirect to `/login`
+6. Logout calls `/api/auth/logout/` and clears storage
 
-### JTI theming — `src/theme.js`
+### Routing
 
-| Token | Value | Usage |
+| Path | Component | Description |
 |---|---|---|
-| `bgPage` | `#141414` | Page background |
-| `bgCard` | `#1e1e1e` | Cards, forms |
-| `bgNavbar` | `#0f0f0f` | Navbar |
-| `bgInput` | `#2a2a2a` | Input fields |
-| `text` | `#ffffff` | Primary text |
-| `textMuted` | `#aaaaaa` | Secondary text |
-| `border` | `#2e2e2e` | Borders |
-| `buttonBg` | `#ffffff` | Primary button |
-| `buttonText` | `#141414` | Primary button text |
+| `/login` | `LoginPage` | Public |
+| `/` | `HomePage` | Schedule list + create draft button |
+| `/schedules/:id` | `ScheduleDetailPage` | AI generation panel + visit table |
 
-Font: **Inter** (Google Fonts). Logo: SVG in `JtiLogo.jsx`.
+### Theming
+
+- `src/muiTheme.js` — MUI `createTheme` in dark mode with JTI tokens. All new pages use MUI components styled via this theme.
+- `src/theme.js` — raw color tokens, still used by `LoginPage` (inline styles).
+
+### Key components
+
+- `CreateScheduleDialog` — MUI Stepper dialog (step 1 active: name, period, POS checklist, promoters checklist). Computes default period as next calendar month without an existing schedule.
+- `ScheduleDetailPage` — two-column layout: sticky AI panel (left) + visit table (right). Hitting Generate/Regenerate replaces the visit list in place.
+
+### Testing
+
+Vitest + React Testing Library + MSW (Mock Service Worker for `fetch` interception).
+
+- `src/test/setup.js` — `@testing-library/jest-dom` matchers
+- `src/test/handlers.js` — default MSW handlers + shared mock data constants
+- Tests cover: render, 401 redirect, empty state, error state, dialog open, create success, AI generation, back navigation
 
 ### Linting
 
@@ -312,7 +376,9 @@ Triggers: push or PR to `main`.
 | Job | Steps |
 |---|---|
 | `backend-lint` | black --check, isort --check, flake8 |
+| `backend-test` | uv sync, Django test suite, coverage report |
 | `frontend-lint` | npm ci, eslint |
+| `frontend-test` | npm ci, vitest run |
 
 ---
 
@@ -366,8 +432,6 @@ Each row = one promoter visit to one POS.
 ---
 
 ## Open Questions
-
-Early-stage PoC — these require stakeholder clarification before building scheduling logic.
 
 | # | Area | Question |
 |---|---|---|

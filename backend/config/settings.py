@@ -103,9 +103,12 @@ REST_FRAMEWORK = {
     ],
 }
 
-# OpenAI
+# AI provider (OpenAI-compatible — works with OpenAI, Google AI Studio, etc.)
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+OPENAI_BASE_URL = os.environ.get(
+    "OPENAI_BASE_URL", ""
+)  # leave blank for OpenAI default
 
 # JWT
 SIMPLE_JWT = {

@@ -130,7 +130,12 @@ def generate_schedule(schedule, optimization_goal: str, user_prompt: str) -> dic
         "Generate the complete visit schedule now."
     )
 
-    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    client_kwargs = {"api_key": settings.OPENAI_API_KEY}
+    base_url = getattr(settings, "OPENAI_BASE_URL", None)
+    if base_url:
+        client_kwargs["base_url"] = base_url
+
+    client = OpenAI(**client_kwargs)
     response = client.chat.completions.create(
         model=settings.OPENAI_MODEL,
         response_format={"type": "json_object"},
