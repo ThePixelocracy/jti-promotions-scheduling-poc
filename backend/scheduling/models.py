@@ -82,6 +82,12 @@ class Schedule(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     notes = models.TextField(blank=True)
+    included_pos = models.ManyToManyField(
+        "PointOfSale", blank=True, related_name="schedules_included"
+    )
+    included_promoters = models.ManyToManyField(
+        "Promoter", blank=True, related_name="schedules_included"
+    )
 
     class Meta:
         ordering = ["-period_start"]

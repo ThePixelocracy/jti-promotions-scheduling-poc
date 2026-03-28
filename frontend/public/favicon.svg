@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Calendar body -->
+  <rect x="3" y="7" width="22" height="20" rx="3" fill="#1e1e1e" stroke="#ffffff" stroke-width="1.5"/>
+
+  <!-- Calendar header band -->
+  <rect x="3" y="7" width="22" height="7" rx="3" fill="#ffffff"/>
+  <rect x="3" y="11" width="22" height="3" fill="#ffffff"/>
+
+  <!-- Binding pegs -->
+  <rect x="9" y="4" width="2.5" height="6" rx="1.25" fill="#ffffff"/>
+  <rect x="16.5" y="4" width="2.5" height="6" rx="1.25" fill="#ffffff"/>
+
+  <!-- Calendar grid dots (days) -->
+  <rect x="7" y="18" width="3" height="2.5" rx="0.75" fill="#ffffff" opacity="0.5"/>
+  <rect x="12" y="18" width="3" height="2.5" rx="0.75" fill="#ffffff" opacity="0.5"/>
+  <rect x="17" y="18" width="3" height="2.5" rx="0.75" fill="#ffffff" opacity="0.5"/>
+  <rect x="7" y="22" width="3" height="2.5" rx="0.75" fill="#ffffff" opacity="0.5"/>
+  <rect x="12" y="22" width="3" height="2.5" rx="0.75" fill="#ffffff" opacity="0.5"/>
+
+  <!-- AI sparkle — large star top-right -->
+  <path d="M26 3 L26.7 5.3 L29 6 L26.7 6.7 L26 9 L25.3 6.7 L23 6 L25.3 5.3 Z" fill="#ffffff"/>
+
+  <!-- AI sparkle — small star bottom-right -->
+  <path d="M28 18 L28.45 19.55 L30 20 L28.45 20.45 L28 22 L27.55 20.45 L26 20 L27.55 19.55 Z" fill="#ffffff" opacity="0.75"/>
+</svg>

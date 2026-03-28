@@ -1,12 +1,22 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "@mui/material";
 import { setupServer } from "msw/node";
 import { http, HttpResponse } from "msw";
-import { beforeAll, afterAll, afterEach, describe, it, expect, beforeEach } from "vitest";
+import {
+  beforeAll,
+  afterAll,
+  afterEach,
+  describe,
+  it,
+  expect,
+  beforeEach,
+} from "vitest";
 import { AuthProvider } from "../context/AuthContext";
 import ProtectedRoute from "../components/ProtectedRoute";
 import HomePage from "../pages/HomePage";
-import { handlers } from "./handlers";
+import muiTheme from "../muiTheme";
+import { handlers, MOCK_SCHEDULES } from "./handlers";
 
 const server = setupServer(...handlers);
 
@@ -16,21 +26,23 @@ afterAll(() => server.close());
 
 function renderHomePage() {
   return render(
-    <AuthProvider>
-      <MemoryRouter initialEntries={["/"]}>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <ProtectedRoute>
-                <HomePage />
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/login" element={<div data-testid="login-page" />} />
-        </Routes>
-      </MemoryRouter>
-    </AuthProvider>
+    <ThemeProvider theme={muiTheme}>
+      <AuthProvider>
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <HomePage />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/login" element={<div data-testid="login-page" />} />
+          </Routes>
+        </MemoryRouter>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
 
@@ -45,19 +57,30 @@ describe("HomePage", () => {
     localStorage.clear();
   });
 
-  it("displays the API message on success", async () => {
+  it("renders the schedule list on success", async () => {
     renderHomePage();
 
     await waitFor(() => {
-      expect(screen.getByText("Hello, world!")).toBeInTheDocument();
+      expect(screen.getByText(MOCK_SCHEDULES[0].name)).toBeInTheDocument();
+    });
+    expect(screen.getByText(MOCK_SCHEDULES[1].name)).toBeInTheDocument();
+    expect(screen.getByText("Published")).toBeInTheDocument();
+    expect(screen.getByText("Draft")).toBeInTheDocument();
+  });
+
+  it("shows empty state when no schedules exist", async () => {
+    server.use(http.get("/api/schedules/", () => HttpResponse.json([])));
+
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText("No schedules yet.")).toBeInTheDocument();
     });
   });
 
   it("redirects to /login when API returns 401", async () => {
     server.use(
-      http.get("/api/hello/", () => {
-        return new HttpResponse(null, { status: 401 });
-      })
+      http.get("/api/schedules/", () => new HttpResponse(null, { status: 401 }))
     );
 
     renderHomePage();
@@ -68,19 +91,54 @@ describe("HomePage", () => {
     expect(localStorage.getItem("jti_access")).toBeNull();
   });
 
-  it("shows error message when API returns a non-401 error", async () => {
+  it("shows an error alert when the API returns a server error", async () => {
     server.use(
-      http.get("/api/hello/", () => {
-        return new HttpResponse(null, { status: 500 });
-      })
+      http.get("/api/schedules/", () => new HttpResponse(null, { status: 500 }))
     );
 
     renderHomePage();
 
     await waitFor(() => {
-      expect(
-        screen.getByText("Could not load data from API.")
-      ).toBeInTheDocument();
+      expect(screen.getByText("Could not load schedules.")).toBeInTheDocument();
+    });
+  });
+
+  it("opens the create dialog when the button is clicked", async () => {
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_SCHEDULES[0].name)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create schedule draft/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Create Schedule Draft")).toBeInTheDocument();
+    });
+  });
+
+  it("adds the new schedule to the list after successful creation", async () => {
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_SCHEDULES[0].name)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create schedule draft/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Create Schedule Draft")).toBeInTheDocument();
+    });
+
+    // Wait for POS + promoters to load in the dialog
+    await waitFor(() => {
+      expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /create draft/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("June 2026")).toBeInTheDocument();
     });
   });
 });
