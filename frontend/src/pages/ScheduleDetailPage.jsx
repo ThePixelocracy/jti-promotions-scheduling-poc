@@ -158,14 +158,9 @@ function GeneratingPlaceholder() {
 function ScheduleProgressPanel({ text, schedule }) {
   const visitCount = (text.match(/"pos_id"/g) || []).length;
 
-  const periodDays =
-    Math.round(
-      (new Date(schedule.period_end + "T00:00:00") -
-        new Date(schedule.period_start + "T00:00:00")) /
-        (1000 * 60 * 60 * 24)
-    ) + 1;
-  const workingDaysPerPromoter = Math.round((periodDays / 7) * 5) + 2;
-  const estimatedVisits = schedule.promoter_count * workingDaysPerPromoter * 2;
+  // Estimate based on POS-demand rules (rule 8): avg ~2.5 visits/POS/month
+  // across priority mix (Strategic 3-4, Prime 2-3, BaseLine 1-2, Developing 1)
+  const estimatedVisits = Math.round(schedule.pos_count * 2.5);
   const progress = Math.min(Math.round((visitCount / estimatedVisits) * 100), 99);
 
   const summaryMatch = text.match(/"summary"\s*:\s*"([^"]*)"/);
