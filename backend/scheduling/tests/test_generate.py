@@ -41,7 +41,7 @@ _MOCK_AI_RESULT = {
 }
 
 
-@override_settings(OPENAI_API_KEY="test-key")
+@override_settings(BEDROCK_MODEL="anthropic.claude-test")
 class ScheduleGenerateTest(APITestCase):
     def setUp(self):
         self.user = _make_user()
@@ -148,6 +148,6 @@ class ScheduleGenerateTest(APITestCase):
         self.assertEqual(response.status_code, 502)
         self.assertIn("error", response.data)
 
-    @override_settings(OPENAI_API_KEY="")
-    def test_missing_api_key_returns_503(self):
+    @override_settings(BEDROCK_MODEL="")
+    def test_missing_model_returns_503(self):
         self.assertEqual(self._post().status_code, 503)

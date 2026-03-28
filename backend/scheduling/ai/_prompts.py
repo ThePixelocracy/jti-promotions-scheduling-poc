@@ -6,10 +6,6 @@ from metrics.models import POSMetrics
 
 _DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-# Thinking-tag delimiters shared with the stream parser.
-THINK_START = "<thinking>"
-THINK_END = "</thinking>"
-
 # ── System prompt ──────────────────────────────────────────────────────────────
 
 _BASE_SYSTEM_PROMPT = """\
@@ -27,7 +23,7 @@ Also compute a SCHEDULE SCORE: sum the optimization formula value \
 for every scheduled visit, using the historical avg values for the \
 chosen POS time window. Include this as the "score" field (integer).
 
-OUTPUT FORMAT — respond with ONLY a JSON object in this exact structure:
+OUTPUT FORMAT — respond with ONLY a valid JSON object in this exact structure:
 {{
   "summary": "2-3 sentences explaining your key scheduling decisions",
   "score": <integer — total optimization score across all visits>,
@@ -37,8 +33,7 @@ OUTPUT FORMAT — respond with ONLY a JSON object in this exact structure:
       "promoter_id": <integer>,
       "date": "YYYY-MM-DD",
       "start_time": "HH:MM",
-      "end_time": "HH:MM",
-      "reason": "one sentence: why this promoter, POS and time slot"
+      "end_time": "HH:MM"
     }}
   ]
 }}
@@ -47,33 +42,18 @@ RULES:
 1. All dates must fall within the schedule period (inclusive).
 2. A promoter cannot have two visits that overlap in time on the same day.
 3. Prefer historically peak time windows (higher avg_sales / avg_interviews).
-4. Match promoters to POS in their region (promoter base_city ≈ POS city).
+4. Match promoters to POS in their region (promoter base_city same or close to POS city).
 5. Permanent and Exclusive promoters take priority; Radical for extra coverage.
 6. Each visit must be 1–4 hours. Align with the peak window start/end.
 7. Use only pos_id and promoter_id values from the lists below.
 8. Target visit frequency by priority:
    Strategic = 3–4 visits/month, Prime = 2–3, BaseLine = 1–2, Developing = 1.
 9. Spread visits across the whole month — do not cluster in one week.
-10. Each promoter works exactly 5 days per week with 2 shifts per working day \
+10. Each promoter works at most 5 days per week with at most 2 visits per working day \
 (morning and afternoon slots). Do not exceed this unless the user says otherwise.
-11. Each promoter should typically work 1 Saturday and 1 Sunday across the whole \
+11. Each promoter should work 1 Saturday and 1 Sunday if necessary across the whole \
 schedule period (not per week). All other days must be Monday–Friday. \
 Override this only if the user explicitly requests different weekend availability.
-12. Keep each visit "reason" field to 10 words or fewer.
-
-RESPONSE STRUCTURE — two sections in this exact order:
-
-1. Open with your reasoning inside <thinking> tags (4–8 sentences). Walk \
-through which promoters you are placing where, why you chose specific time \
-windows, how you balanced weekend coverage, and any trade-offs made. Be \
-specific — name promoters and POS where helpful.
-
-<thinking>
-...your reasoning here...
-</thinking>
-
-2. Immediately after the closing </thinking> tag output ONLY a valid JSON \
-object — no other text before or after it.
 """
 
 
@@ -135,12 +115,12 @@ def _promoter_block_line(promoter) -> str:
 # ── Message builder ────────────────────────────────────────────────────────────
 
 
-def build_messages(schedule, optimization_goal: str, user_prompt: str) -> list[dict]:
+def build_messages(schedule, optimization_goal: str, user_prompt: str) -> dict:
     """
-    Build the full messages list for the LLM call.
+    Build the prompt payload for the Bedrock converse_stream call.
 
-    Includes an assistant-turn primer ("<thinking>") so the model is forced
-    to continue from that tag regardless of its default output style.
+    Returns a dict with "system" (str) and "user" (str) so the caller
+    can pass them to the converse API's separate system/messages parameters.
     """
     pos_list = list(schedule.included_pos.select_related().all())
     promoter_list = list(schedule.included_promoters.all())
@@ -157,9 +137,7 @@ def build_messages(schedule, optimization_goal: str, user_prompt: str) -> list[d
         "Generate the complete visit schedule now."
     )
 
-    return [
-        {"role": "system", "content": build_system_prompt(optimization_goal)},
-        {"role": "user", "content": user_content},
-        # Primer: forces the model to continue from <thinking>
-        {"role": "assistant", "content": THINK_START},
-    ]
+    return {
+        "system": build_system_prompt(optimization_goal),
+        "user": user_content,
+    }

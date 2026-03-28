@@ -103,12 +103,13 @@ REST_FRAMEWORK = {
     ],
 }
 
-# AI provider (OpenAI-compatible — works with OpenAI, Google AI Studio, etc.)
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-OPENAI_BASE_URL = os.environ.get(
-    "OPENAI_BASE_URL", ""
-)  # leave blank for OpenAI default
+# AI provider — AWS Bedrock
+AWS_REGION = os.environ.get("AWS_REGION", "us-east-1")
+BEDROCK_MODEL = os.environ.get(
+    "BEDROCK_MODEL", "us.anthropic.claude-3-5-sonnet-20241022-v2:0"
+)
+# Set to 0 to disable extended thinking (required for models that don't support it)
+BEDROCK_THINKING_BUDGET = int(os.environ.get("BEDROCK_THINKING_BUDGET", "8000"))
 
 # JWT
 SIMPLE_JWT = {

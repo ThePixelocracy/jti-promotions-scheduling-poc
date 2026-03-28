@@ -119,7 +119,7 @@ backend/.venv/Scripts/Activate.ps1           # activate (PowerShell)
 - `djangorestframework-simplejwt` — JWT authentication
 - `django-cors-headers`
 - `openpyxl` — Excel reading (fixture/data generation scripts)
-- `openai` — OpenAI-compatible LLM client (works with OpenAI and Google AI Studio)
+- `boto3` — AWS SDK; used to call Bedrock `converse_stream` for AI generation
 - `python-dotenv` — loads `backend/.env` at startup
 
 ### Environment variables
@@ -128,16 +128,12 @@ Loaded from `backend/.env` (gitignored). Copy `backend/.env.example` to get star
 
 | Variable | Required | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | Yes | API key for the LLM provider |
-| `OPENAI_MODEL` | No | Model name (default: `gpt-4o-mini`) |
-| `OPENAI_BASE_URL` | No | Override base URL — set to Google AI Studio endpoint for free-tier use |
+| `AWS_REGION` | No | Bedrock region (default: `us-east-1`) |
+| `BEDROCK_MODEL` | No | Bedrock model ID (default: `anthropic.claude-3-5-sonnet-20241022-v2:0`) |
+| `AWS_ACCESS_KEY_ID` | No* | AWS credentials — not needed when using an IAM role or `~/.aws/credentials` |
+| `AWS_SECRET_ACCESS_KEY` | No* | As above |
 
-**Google AI Studio (free tier):**
-```
-OPENAI_API_KEY=<key from https://aistudio.google.com/apikey>
-OPENAI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
-OPENAI_MODEL=gemini-2.0-flash
-```
+Extended thinking is always enabled (`budget_tokens=8000`). Newer Claude models require a **cross-region inference profile ID** (prefixed with `us.`) rather than a bare model ID — e.g. `us.anthropic.claude-3-7-sonnet-20250219-v1:0`. The profile must be enabled in the Bedrock console for your account.
 
 ### Django apps
 

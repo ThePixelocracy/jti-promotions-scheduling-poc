@@ -1,8 +1,9 @@
 """
-Schedule generation.
+Schedule generation via AWS Bedrock converse_stream.
 
-`stream_generate_schedule` is the core implementation: it calls the LLM,
-streams thinking deltas, then yields a single done event with parsed visits.
+`stream_generate_schedule` is the core implementation: it calls the Bedrock
+converse API with extended thinking enabled, streams thinking deltas, then
+yields a single done event with parsed visits.
 
 `generate_schedule` is a thin blocking wrapper used by the Django test suite
 (which mocks it at the view level and never calls it directly).
@@ -13,25 +14,19 @@ import json
 from django.conf import settings
 
 from ._client import make_client
-from ._prompts import THINK_END, THINK_START, build_messages
-
-# Number of trailing chars to hold back while scanning for the closing tag,
-# so it is never split across two consecutive chunks.
-_HOLD = len(THINK_END) - 1
+from ._prompts import build_messages
 
 
 def _extract_json(text: str) -> dict:
     """
-    Pull the JSON object out of the raw accumulated LLM response.
+    Pull the JSON object out of the raw text content returned by the model.
 
-    Handles two common model quirks:
-      - Wrapping the JSON in a ```json … ``` code fence.
-      - Leaving stray whitespace before/after the object.
+    Handles the common model quirk of wrapping JSON in a ```json … ``` fence.
     """
-    json_text = text.split(THINK_END, 1)[1].strip() if THINK_END in text else text
-    if json_text.startswith("```"):
-        json_text = json_text.split("\n", 1)[1].rsplit("```", 1)[0]
-    return json.loads(json_text.strip())
+    text = text.strip()
+    if text.startswith("```"):
+        text = text.split("\n", 1)[1].rsplit("```", 1)[0]
+    return json.loads(text.strip())
 
 
 def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str):
@@ -41,89 +36,100 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
     Yields
     ------
     {"type": "thinking", "delta": str}
-        One or more chunks of the model's reasoning text, suitable for
-        live display.  Emitted while the model is inside <thinking> tags.
+        One or more chunks of the model's extended thinking text, suitable
+        for live display.
 
     {"type": "done", "summary": str, "score": int | None,
-     "visits": list, "usage": dict}
+     "visits": list, "usage": dict, "messages": dict, "raw_response": str,
+     "total_tokens": int}
         Emitted once when the full response has been received and the JSON
         payload successfully parsed.
 
-    {"type": "error", "message": str}
-        Emitted instead of "done" if the LLM call or JSON parsing fails.
+    {"type": "error", "message": str, "messages": dict, "raw_response": str,
+     "total_tokens": int}
+        Emitted instead of "done" if the Bedrock call or JSON parsing fails.
         The generator stops after this event.
     """
-    messages = build_messages(schedule, optimization_goal, user_prompt)
+    prompt = build_messages(schedule, optimization_goal, user_prompt)
     client = make_client()
 
-    # Seed accumulated with the assistant primer so the thinking-tag parser
-    # is already in the correct state before the first streamed chunk arrives.
-    accumulated = THINK_START
-    thinking_done = False
-    hold_buf = ""
+    thinking_buf = ""
+    json_buf = ""
     total_tokens = 0
 
+    thinking_budget = getattr(settings, "BEDROCK_THINKING_BUDGET", 8000)
+
+    kwargs = {
+        "modelId": settings.BEDROCK_MODEL,
+        "system": [{"text": prompt["system"]}],
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"text": prompt["user"]}],
+            }
+        ],
+        "inferenceConfig": {"maxTokens": 8192},
+    }
+    if thinking_budget > 0:
+        kwargs["additionalModelRequestFields"] = {
+            "thinking": {"type": "enabled", "budget_tokens": thinking_budget}
+        }
+
     try:
-        stream = client.chat.completions.create(
-            model=settings.OPENAI_MODEL,
-            messages=messages,
-            temperature=0.2,
-            max_tokens=getattr(settings, "OPENAI_MAX_TOKENS", 65536),
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        for chunk in stream:
-            if hasattr(chunk, "usage") and chunk.usage:
-                total_tokens = chunk.usage.total_tokens or 0
+        response = client.converse_stream(**kwargs)
 
-            if not chunk.choices:
+        for event in response["stream"]:
+            if "metadata" in event:
+                usage = event["metadata"].get("usage", {})
+                total_tokens = usage.get("totalTokens", 0)
                 continue
 
-            delta = chunk.choices[0].delta.content or ""
-            if not delta:
+            if "contentBlockDelta" not in event:
                 continue
 
-            accumulated += delta
+            delta = event["contentBlockDelta"]["delta"]
 
-            if thinking_done:
-                continue
+            if "thinkingDelta" in delta:
+                # Anthropic extended thinking
+                chunk = delta["thinkingDelta"].get("thinkingInput", "")
+                thinking_buf += chunk
+                if chunk:
+                    yield {"type": "thinking", "delta": chunk}
 
-            # We are inside <thinking>. Buffer the tail to avoid yielding a
-            # partial closing tag, then flush whatever is definitely safe.
-            combined = hold_buf + delta
-            if THINK_END in combined:
-                thinking_done = True
-                before_end = combined.split(THINK_END, 1)[0]
-                if before_end:
-                    yield {"type": "thinking", "delta": before_end}
-                hold_buf = ""
-            else:
-                safe_len = max(0, len(combined) - _HOLD)
-                safe, hold_buf = combined[:safe_len], combined[safe_len:]
-                if safe:
-                    yield {"type": "thinking", "delta": safe}
+            elif "textDelta" in delta:
+                # Anthropic text (non-thinking path)
+                json_buf += delta["textDelta"].get("text", "")
+
+            elif "text" in delta:
+                # Non-Anthropic models (e.g. Qwen, Nova)
+                chunk = delta["text"]
+                json_buf += chunk
+                if chunk:
+                    yield {"type": "thinking", "delta": chunk}
 
     except Exception as exc:
         yield {
             "type": "error",
             "message": str(exc),
-            "messages": messages,
-            "raw_response": accumulated,
+            "messages": prompt,
+            "raw_response": thinking_buf + json_buf,
             "total_tokens": total_tokens,
         }
         return
 
     try:
-        result = _extract_json(accumulated)
+        result = _extract_json(json_buf)
     except Exception as exc:
         yield {
             "type": "error",
             "message": f"Failed to parse AI response: {exc}",
-            "messages": messages,
-            "raw_response": accumulated,
+            "messages": prompt,
+            "raw_response": json_buf,
             "total_tokens": total_tokens,
         }
         return
+
+    raw_response = f"<thinking>{thinking_buf}</thinking>\n{json_buf}"
 
     yield {
         "type": "done",
@@ -135,8 +141,8 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
             "completion_tokens": 0,
             "total_tokens": total_tokens,
         },
-        "messages": messages,
-        "raw_response": accumulated,
+        "messages": prompt,
+        "raw_response": raw_response,
         "total_tokens": total_tokens,
     }
 

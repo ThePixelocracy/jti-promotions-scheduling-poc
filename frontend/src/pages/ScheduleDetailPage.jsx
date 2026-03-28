@@ -10,6 +10,7 @@ import {
   Container,
   Divider,
   IconButton,
+  LinearProgress,
   Paper,
   Popover,
   Tab,
@@ -149,6 +150,143 @@ function GeneratingPlaceholder() {
             }}
           />
         ))}
+      </Box>
+    </Box>
+  );
+}
+
+function ScheduleProgressPanel({ text, schedule }) {
+  const visitCount = (text.match(/"pos_id"/g) || []).length;
+
+  const periodDays =
+    Math.round(
+      (new Date(schedule.period_end + "T00:00:00") -
+        new Date(schedule.period_start + "T00:00:00")) /
+        (1000 * 60 * 60 * 24)
+    ) + 1;
+  const workingDaysPerPromoter = Math.round((periodDays / 7) * 5) + 2;
+  const estimatedVisits = schedule.promoter_count * workingDaysPerPromoter * 2;
+  const progress = Math.min(Math.round((visitCount / estimatedVisits) * 100), 99);
+
+  const summaryMatch = text.match(/"summary"\s*:\s*"([^"]*)"/);
+  const summary = summaryMatch ? summaryMatch[1] : null;
+
+  return (
+    <Box
+      sx={{
+        minHeight: 340,
+        display: "flex",
+        flexDirection: "column",
+        borderRadius: 1,
+        border: "1px solid",
+        borderColor: "divider",
+        bgcolor: "action.hover",
+        overflow: "hidden",
+      }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          alignItems: "center",
+          gap: 1,
+          px: 2,
+          py: 1,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+        }}
+      >
+        <Box sx={{ display: "flex", gap: 0.75 }}>
+          {[0, 1, 2].map((i) => (
+            <Box
+              key={i}
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                bgcolor: "primary.main",
+                opacity: 0.7,
+                "@keyframes pulse": {
+                  "0%, 100%": { opacity: 0.2, transform: "scale(0.85)" },
+                  "50%": { opacity: 1, transform: "scale(1)" },
+                },
+                animation: `pulse 1.4s ease-in-out ${i * 0.2}s infinite`,
+              }}
+            />
+          ))}
+        </Box>
+        <Typography
+          variant="caption"
+          sx={{
+            color: "text.disabled",
+            letterSpacing: 1.5,
+            textTransform: "uppercase",
+            fontWeight: 500,
+          }}
+        >
+          Generating Schedule
+        </Typography>
+      </Box>
+
+      <Box
+        sx={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 3,
+          px: 4,
+          py: 3,
+        }}
+      >
+        <Box sx={{ textAlign: "center" }}>
+          <Typography
+            variant="h3"
+            fontWeight={600}
+            sx={{ lineHeight: 1, color: "primary.main" }}
+          >
+            {visitCount}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ letterSpacing: 0.5 }}>
+            visits planned so far
+          </Typography>
+        </Box>
+
+        <Box sx={{ width: "100%", maxWidth: 360 }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", mb: 0.5 }}>
+            <Typography variant="caption" color="text.secondary">
+              Progress
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {progress}% of ~{estimatedVisits.toLocaleString()} estimated
+            </Typography>
+          </Box>
+          <LinearProgress
+            variant="determinate"
+            value={progress}
+            sx={{ height: 6, borderRadius: 3 }}
+          />
+        </Box>
+
+        {summary && (
+          <Box sx={{ textAlign: "center", maxWidth: 420 }}>
+            <Typography
+              variant="caption"
+              color="text.disabled"
+              sx={{
+                display: "block",
+                mb: 0.5,
+                letterSpacing: 0.5,
+                textTransform: "uppercase",
+              }}
+            >
+              Summary
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ fontStyle: "italic" }}>
+              {summary}
+            </Typography>
+          </Box>
+        )}
       </Box>
     </Box>
   );
@@ -738,7 +876,11 @@ export default function ScheduleDetailPage() {
           {/* ── Right: thinking stream / placeholder / visit table ── */}
           <Box ref={generatingPanelRef}>
             {isDraft && generating && thinkingText ? (
-              <ThinkingPanel text={thinkingText} stalled={thinkingStalled} />
+              thinkingText.trimStart().startsWith("{") ? (
+                <ScheduleProgressPanel text={thinkingText} schedule={schedule} />
+              ) : (
+                <ThinkingPanel text={thinkingText} stalled={thinkingStalled} />
+              )
             ) : isDraft && generating ? (
               <GeneratingPlaceholder />
             ) : (

@@ -29,9 +29,9 @@ class ScheduleGenerateView(APIView):
     renderer_classes = [JSONRenderer, ServerSentEventRenderer]
 
     def post(self, request, pk):
-        if not settings.OPENAI_API_KEY:
+        if not settings.BEDROCK_MODEL:
             return Response(
-                {"error": "OPENAI_API_KEY is not configured on the server."},
+                {"error": "BEDROCK_MODEL is not configured on the server."},
                 status=drf_status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -57,7 +57,7 @@ class ScheduleGenerateView(APIView):
 
         LLMCallLog.objects.create(
             schedule=schedule,
-            model_name=settings.OPENAI_MODEL,
+            model_name=settings.BEDROCK_MODEL,
             optimization_goal=optimization_goal,
             user_prompt=user_prompt,
             prompt=result.get("messages", []),
@@ -102,7 +102,7 @@ class ScheduleGenerateView(APIView):
                 if event["type"] == "error":
                     LLMCallLog.objects.create(
                         schedule=schedule,
-                        model_name=settings.OPENAI_MODEL,
+                        model_name=settings.BEDROCK_MODEL,
                         optimization_goal=optimization_goal,
                         user_prompt=user_prompt,
                         prompt=event.get("messages", []),
@@ -118,7 +118,7 @@ class ScheduleGenerateView(APIView):
                 # "done" — persist log + visits + score, then emit the SSE payload
                 LLMCallLog.objects.create(
                     schedule=schedule,
-                    model_name=settings.OPENAI_MODEL,
+                    model_name=settings.BEDROCK_MODEL,
                     optimization_goal=optimization_goal,
                     user_prompt=user_prompt,
                     prompt=event.get("messages", []),
