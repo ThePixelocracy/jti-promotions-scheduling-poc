@@ -141,4 +141,35 @@ describe("HomePage", () => {
       expect(screen.getByText("June 2026")).toBeInTheDocument();
     });
   });
+
+  // ── Score column ─────────────────────────────────────────────────────────
+
+  it("renders a Score column header", async () => {
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_SCHEDULES[0].name)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("columnheader", { name: /score/i })).toBeInTheDocument();
+  });
+
+  it("displays the score value for schedules that have one", async () => {
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_SCHEDULES[0].name)).toBeInTheDocument();
+    });
+    // MOCK_SCHEDULES[0].score = 1240
+    expect(screen.getByText("1,240")).toBeInTheDocument();
+  });
+
+  it("displays a dash for schedules with no score", async () => {
+    renderHomePage();
+
+    await waitFor(() => {
+      expect(screen.getByText(MOCK_SCHEDULES[1].name)).toBeInTheDocument();
+    });
+    // MOCK_SCHEDULES[1].score = null → "—"
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
 });

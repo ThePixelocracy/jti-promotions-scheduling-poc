@@ -68,6 +68,7 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
             model=settings.OPENAI_MODEL,
             messages=messages,
             temperature=0.2,
+            max_tokens=getattr(settings, "OPENAI_MAX_TOKENS", 65536),
             stream=True,
             stream_options={"include_usage": True},
         )

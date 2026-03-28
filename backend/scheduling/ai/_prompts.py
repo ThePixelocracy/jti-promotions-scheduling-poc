@@ -59,6 +59,7 @@ RULES:
 11. Each promoter should work exactly 1 Saturday and 1 Sunday across the whole \
 schedule period (not per week). All other days must be Monday–Friday. \
 Override this only if the user explicitly requests different weekend availability.
+12. Keep each visit "reason" field to 20 words or fewer.
 
 RESPONSE STRUCTURE — two sections in this exact order:
 

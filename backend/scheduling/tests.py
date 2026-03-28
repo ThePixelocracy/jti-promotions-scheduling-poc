@@ -1,6 +1,8 @@
+import io
 from datetime import date
 from unittest.mock import patch
 
+import openpyxl
 from django.contrib.auth import get_user_model
 from django.test import override_settings
 from rest_framework.test import APITestCase
@@ -8,6 +10,9 @@ from rest_framework.test import APITestCase
 from .models import PointOfSale, Promoter, Schedule, ScheduledVisit
 
 User = get_user_model()
+
+
+# ── Shared helpers ──────────────────────────────────────────────────────────
 
 
 def _make_user(username="admin"):
@@ -24,8 +29,10 @@ def _make_schedule(user, name, period_start, period_end, status="Draft"):
     )
 
 
-def _make_pos(cdb_code="POS001", name="Test POS", is_active=True):
-    return PointOfSale.objects.create(cdb_code=cdb_code, name=name, is_active=is_active)
+def _make_pos(cdb_code="POS001", name="Test POS", city="Athens", is_active=True):
+    return PointOfSale.objects.create(
+        cdb_code=cdb_code, name=name, city=city, is_active=is_active
+    )
 
 
 def _make_promoter(username="promo1", first_name="Alice", last_name="Smith"):
@@ -35,6 +42,51 @@ def _make_promoter(username="promo1", first_name="Alice", last_name="Smith"):
         last_name=last_name,
         programme_type="Permanent",
     )
+
+
+def _make_visit(schedule, pos, promoter=None, visit_date=None, **kwargs):
+    return ScheduledVisit.objects.create(
+        schedule=schedule,
+        pos=pos,
+        promoter=promoter,
+        date=visit_date or date(2026, 4, 3),
+        start_time=kwargs.get("start_time", "09:00"),
+        end_time=kwargs.get("end_time", "11:00"),
+        programme_type=kwargs.get("programme_type", "Permanent"),
+        week_label=kwargs.get("week_label", "W1"),
+        comments=kwargs.get("comments", ""),
+    )
+
+
+def _make_xlsx(rows):
+    """Create an in-memory xlsx with the standard import header + given rows."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(
+        [
+            "Week",
+            "Date",
+            "Start Time",
+            "End Time",
+            "CDB Code",
+            "POS Name",
+            "City",
+            "Priority",
+            "Promoter",
+            "Programme",
+            "AI Reasoning",
+        ]
+    )
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    buf.name = "schedule.xlsx"
+    return buf
+
+
+# ── Schedule list / auth ────────────────────────────────────────────────────
 
 
 class ScheduleListAuthTest(APITestCase):
@@ -75,6 +127,7 @@ class ScheduleListTest(APITestCase):
             "period_start",
             "period_end",
             "status",
+            "score",
             "created_by",
             "created_at",
             "pos_count",
@@ -83,6 +136,11 @@ class ScheduleListTest(APITestCase):
             self.assertIn(field, data)
         self.assertEqual(data["created_by"], "admin")
         self.assertEqual(data["status"], "Draft")
+
+    def test_score_null_by_default(self):
+        _make_schedule(self.user, "April", date(2026, 4, 1), date(2026, 4, 30))
+        data = self.client.get("/api/schedules/").data[0]
+        self.assertIsNone(data["score"])
 
     def test_pos_count_and_promoter_count(self):
         schedule = _make_schedule(
@@ -133,6 +191,9 @@ class ScheduleListFilterTest(APITestCase):
     def test_unknown_status_returns_empty(self):
         response = self.client.get("/api/schedules/?status=Bogus")
         self.assertEqual(len(response.data), 0)
+
+
+# ── Schedule create ─────────────────────────────────────────────────────────
 
 
 class ScheduleCreateAuthTest(APITestCase):
@@ -202,6 +263,9 @@ class ScheduleCreateTest(APITestCase):
         del payload["name"]
         response = self.client.post("/api/schedules/", payload, format="json")
         self.assertEqual(response.status_code, 400)
+
+
+# ── POS / Promoter lists ────────────────────────────────────────────────────
 
 
 class PointOfSaleListTest(APITestCase):
@@ -310,32 +374,14 @@ class ScheduleVisitListTest(APITestCase):
         self.assertEqual(response.data, [])
 
     def test_returns_visits(self):
-        ScheduledVisit.objects.create(
-            schedule=self.schedule,
-            pos=self.pos,
-            promoter=self.promoter,
-            date=date(2026, 4, 3),
-            start_time="09:00",
-            end_time="11:00",
-            programme_type="Permanent",
-            week_label="W1",
-        )
+        _make_visit(self.schedule, self.pos, self.promoter)
         response = self.client.get(f"/api/schedules/{self.schedule.pk}/visits/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data), 1)
         self.assertEqual(response.data[0]["pos"]["cdb_code"], "POS001")
 
     def test_serializes_nested_pos_and_promoter(self):
-        ScheduledVisit.objects.create(
-            schedule=self.schedule,
-            pos=self.pos,
-            promoter=self.promoter,
-            date=date(2026, 4, 3),
-            start_time="09:00",
-            end_time="11:00",
-            programme_type="Permanent",
-            week_label="W1",
-        )
+        _make_visit(self.schedule, self.pos, self.promoter)
         data = self.client.get(f"/api/schedules/{self.schedule.pk}/visits/").data[0]
         self.assertIn("id", data["pos"])
         self.assertIn("name", data["pos"])
@@ -346,6 +392,7 @@ class ScheduleVisitListTest(APITestCase):
 
 _MOCK_AI_RESULT = {
     "summary": "Scheduled 2 visits based on peak windows.",
+    "score": 840,
     "visits": [
         {
             "pos_id": None,  # filled in setUp
@@ -381,7 +428,6 @@ class ScheduleGenerateTest(APITestCase):
         self.schedule.included_pos.add(self.pos)
         self.schedule.included_promoters.add(self.promoter)
 
-        # Patch mock result with real IDs
         self.mock_result = {
             **_MOCK_AI_RESULT,
             "visits": [
@@ -411,18 +457,22 @@ class ScheduleGenerateTest(APITestCase):
         self.assertIn("usage", response.data)
 
     @patch("scheduling.views.generate_schedule")
+    def test_score_returned_in_response(self, mock_gen):
+        mock_gen.return_value = self.mock_result
+        response = self._post()
+        self.assertEqual(response.data["score"], 840)
+
+    @patch("scheduling.views.generate_schedule")
+    def test_score_saved_to_schedule(self, mock_gen):
+        mock_gen.return_value = self.mock_result
+        self._post()
+        self.schedule.refresh_from_db()
+        self.assertEqual(self.schedule.score, 840)
+
+    @patch("scheduling.views.generate_schedule")
     def test_clears_existing_visits_before_creating(self, mock_gen):
         mock_gen.return_value = self.mock_result
-        # Pre-existing visit
-        ScheduledVisit.objects.create(
-            schedule=self.schedule,
-            pos=self.pos,
-            date=date(2026, 4, 1),
-            start_time="09:00",
-            end_time="11:00",
-            programme_type="Permanent",
-            week_label="W1",
-        )
+        _make_visit(self.schedule, self.pos)
         self._post()
         self.assertEqual(
             ScheduledVisit.objects.filter(schedule=self.schedule).count(), 2
@@ -444,8 +494,8 @@ class ScheduleGenerateTest(APITestCase):
         mock_gen.return_value = self.mock_result
         self._post()
         visits = ScheduledVisit.objects.filter(schedule=self.schedule).order_by("date")
-        self.assertEqual(visits[0].week_label, "W1")  # Apr 3 = day 2 → W1
-        self.assertEqual(visits[1].week_label, "W2")  # Apr 10 = day 9 → W2
+        self.assertEqual(visits[0].week_label, "W1")
+        self.assertEqual(visits[1].week_label, "W2")
 
     @patch("scheduling.views.generate_schedule")
     def test_unknown_pos_id_skipped_and_reported(self, mock_gen):
@@ -479,3 +529,307 @@ class ScheduleGenerateTest(APITestCase):
     def test_missing_api_key_returns_503(self):
         response = self._post()
         self.assertEqual(response.status_code, 503)
+
+
+# ── Publish ─────────────────────────────────────────────────────────────────
+
+
+class SchedulePublishTest(APITestCase):
+    def setUp(self):
+        self.user = _make_user()
+        self.client.force_authenticate(user=self.user)
+        self.schedule = _make_schedule(
+            self.user, "April 2026", date(2026, 4, 1), date(2026, 4, 30), "Draft"
+        )
+
+    def _post(self, pk=None):
+        pk = pk or self.schedule.pk
+        return self.client.post(f"/api/schedules/{pk}/publish/")
+
+    def test_unauthenticated_returns_401(self):
+        self.client.logout()
+        self.assertEqual(self._post().status_code, 401)
+
+    def test_not_found_returns_404(self):
+        self.assertEqual(self._post(pk=99999).status_code, 404)
+
+    def test_draft_publish_returns_200(self):
+        self.assertEqual(self._post().status_code, 200)
+
+    def test_status_set_to_published(self):
+        self._post()
+        self.schedule.refresh_from_db()
+        self.assertEqual(self.schedule.status, "Published")
+
+    def test_response_contains_published_status(self):
+        response = self._post()
+        self.assertEqual(response.data["status"], "Published")
+
+    def test_response_serializes_schedule_fields(self):
+        response = self._post()
+        for field in ["id", "name", "status", "period_start", "period_end"]:
+            self.assertIn(field, response.data)
+
+    def test_publishing_already_published_returns_400(self):
+        self.schedule.status = "Published"
+        self.schedule.save()
+        self.assertEqual(self._post().status_code, 400)
+
+    def test_publishing_archived_returns_400(self):
+        self.schedule.status = "Archived"
+        self.schedule.save()
+        self.assertEqual(self._post().status_code, 400)
+
+    def test_400_response_contains_error_message(self):
+        self.schedule.status = "Published"
+        self.schedule.save()
+        response = self._post()
+        self.assertIn("error", response.data)
+
+
+# ── Export ──────────────────────────────────────────────────────────────────
+
+
+class ScheduleExportTest(APITestCase):
+    def setUp(self):
+        self.user = _make_user()
+        self.client.force_authenticate(user=self.user)
+        self.pos = _make_pos("POS001", "Test POS", city="Athens")
+        self.promoter = _make_promoter("alice", "Alice", "Smith")
+        self.schedule = _make_schedule(
+            self.user, "April 2026", date(2026, 4, 1), date(2026, 4, 30)
+        )
+
+    def _get(self, pk=None):
+        pk = pk or self.schedule.pk
+        return self.client.get(f"/api/schedules/{pk}/export/")
+
+    def test_unauthenticated_returns_401(self):
+        self.client.logout()
+        self.assertEqual(self._get().status_code, 401)
+
+    def test_not_found_returns_404(self):
+        self.assertEqual(self._get(pk=99999).status_code, 404)
+
+    def test_returns_xlsx_content_type(self):
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+
+    def test_content_disposition_includes_schedule_name(self):
+        response = self._get()
+        self.assertIn("April 2026", response["Content-Disposition"])
+        self.assertIn("attachment", response["Content-Disposition"])
+
+    def test_xlsx_header_row(self):
+        response = self._get()
+        wb = openpyxl.load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        headers = [cell.value for cell in ws[1]]
+        self.assertIn("CDB Code", headers)
+        self.assertIn("POS Name", headers)
+        self.assertIn("Promoter", headers)
+
+    def test_xlsx_contains_visit_data(self):
+        _make_visit(
+            self.schedule,
+            self.pos,
+            self.promoter,
+            comments="Peak window.",
+        )
+        response = self._get()
+        wb = openpyxl.load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        self.assertEqual(len(rows), 1)
+        # CDB Code is column 5 (index 4)
+        self.assertEqual(rows[0][4], "POS001")
+        # Promoter is column 9 (index 8)
+        self.assertIn("Alice", rows[0][8])
+
+    def test_empty_schedule_returns_header_row_only(self):
+        response = self._get()
+        wb = openpyxl.load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        self.assertEqual(len(rows), 0)
+
+    def test_visits_ordered_by_date_then_time(self):
+        _make_visit(
+            self.schedule,
+            self.pos,
+            visit_date=date(2026, 4, 10),
+            start_time="15:00",
+            end_time="17:00",
+        )
+        _make_visit(
+            self.schedule,
+            self.pos,
+            visit_date=date(2026, 4, 3),
+            start_time="09:00",
+            end_time="11:00",
+        )
+        response = self._get()
+        wb = openpyxl.load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        rows = list(ws.iter_rows(min_row=2, values_only=True))
+        # Date column is index 1
+        self.assertEqual(rows[0][1], "2026-04-03")
+        self.assertEqual(rows[1][1], "2026-04-10")
+
+
+# ── Import ──────────────────────────────────────────────────────────────────
+
+
+class ScheduleImportTest(APITestCase):
+    def setUp(self):
+        self.user = _make_user()
+        self.client.force_authenticate(user=self.user)
+        self.pos = _make_pos("POS001", "Test POS")
+        self.promoter = _make_promoter("alice", "Alice", "Smith")
+        self.schedule = _make_schedule(
+            self.user, "April 2026", date(2026, 4, 1), date(2026, 4, 30)
+        )
+
+    def _post_xlsx(self, rows):
+        buf = _make_xlsx(rows)
+        return self.client.post(
+            f"/api/schedules/{self.schedule.pk}/import/",
+            {"file": buf},
+            format="multipart",
+        )
+
+    def _valid_row(self, **overrides):
+        row = [
+            "W1",
+            "2026-04-03",
+            "09:00",
+            "11:00",
+            "POS001",
+            "Test POS",
+            "Athens",
+            "Strategic",
+            "Alice Smith",
+            "Permanent",
+            "Peak window.",
+        ]
+        for i, val in overrides.items():
+            row[i] = val
+        return row
+
+    def test_unauthenticated_returns_401(self):
+        self.client.logout()
+        response = self.client.post(
+            f"/api/schedules/{self.schedule.pk}/import/", {}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_not_found_returns_404(self):
+        buf = _make_xlsx([self._valid_row()])
+        response = self.client.post(
+            "/api/schedules/99999/import/", {"file": buf}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_no_file_returns_400(self):
+        response = self.client.post(
+            f"/api/schedules/{self.schedule.pk}/import/", {}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_invalid_file_returns_400(self):
+        bad_file = io.BytesIO(b"not an xlsx file")
+        bad_file.name = "bad.xlsx"
+        response = self.client.post(
+            f"/api/schedules/{self.schedule.pk}/import/",
+            {"file": bad_file},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_valid_import_creates_visit(self):
+        response = self._post_xlsx([self._valid_row()])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 1)
+        self.assertEqual(
+            ScheduledVisit.objects.filter(schedule=self.schedule).count(), 1
+        )
+
+    def test_imported_visit_has_correct_fields(self):
+        self._post_xlsx([self._valid_row()])
+        visit = ScheduledVisit.objects.get(schedule=self.schedule)
+        self.assertEqual(visit.pos, self.pos)
+        self.assertEqual(visit.date, date(2026, 4, 3))
+        self.assertEqual(str(visit.start_time)[:5], "09:00")
+        self.assertEqual(str(visit.end_time)[:5], "11:00")
+        self.assertEqual(visit.week_label, "W1")
+
+    def test_import_clears_existing_visits(self):
+        _make_visit(self.schedule, self.pos, self.promoter)
+        self._post_xlsx([self._valid_row()])
+        # Only the imported visit remains
+        self.assertEqual(
+            ScheduledVisit.objects.filter(schedule=self.schedule).count(), 1
+        )
+
+    def test_promoter_resolved_by_full_name(self):
+        self._post_xlsx([self._valid_row()])
+        visit = ScheduledVisit.objects.get(schedule=self.schedule)
+        self.assertEqual(visit.promoter, self.promoter)
+
+    def test_unknown_promoter_name_leaves_promoter_null(self):
+        # Override promoter column with unknown name
+        row = self._valid_row()
+        row[8] = "Unknown Person"
+        self._post_xlsx([row])
+        visit = ScheduledVisit.objects.get(schedule=self.schedule)
+        self.assertIsNone(visit.promoter)
+
+    def test_unknown_cdb_code_skipped_with_error(self):
+        row = self._valid_row()
+        row[4] = "BADCODE"
+        response = self._post_xlsx([row])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 0)
+        self.assertEqual(len(response.data["errors"]), 1)
+        self.assertIn("BADCODE", response.data["errors"][0])
+
+    def test_date_outside_period_skipped_with_error(self):
+        row = self._valid_row()
+        row[1] = "2026-06-01"  # outside April
+        response = self._post_xlsx([row])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 0)
+        self.assertEqual(len(response.data["errors"]), 1)
+
+    def test_missing_date_skipped_with_error(self):
+        row = self._valid_row()
+        row[1] = None
+        response = self._post_xlsx([row])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 0)
+        self.assertEqual(len(response.data["errors"]), 1)
+
+    def test_missing_cdb_code_skipped_with_error(self):
+        row = self._valid_row()
+        row[4] = None
+        response = self._post_xlsx([row])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 0)
+
+    def test_multiple_rows_partial_success(self):
+        good = self._valid_row()
+        bad = self._valid_row()
+        bad[4] = "BADCODE"
+        response = self._post_xlsx([good, bad])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data["visits"]), 1)
+        self.assertEqual(len(response.data["errors"]), 1)
+
+    def test_week_label_falls_back_to_computed(self):
+        row = self._valid_row()
+        row[0] = None  # no week_label in file
+        self._post_xlsx([row])
+        visit = ScheduledVisit.objects.get(schedule=self.schedule)
+        # Apr 3 is day 2 of period starting Apr 1 → W1
+        self.assertEqual(visit.week_label, "W1")

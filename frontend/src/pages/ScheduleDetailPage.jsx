@@ -154,12 +154,32 @@ function GeneratingPlaceholder() {
   );
 }
 
-function ThinkingPanel({ text }) {
-  const bottomRef = useRef(null);
+function ThinkingPanel({ text, stalled }) {
+  const scrollBoxRef = useRef(null);
+  const [stallMsgIndex, setStallMsgIndex] = useState(() =>
+    Math.floor(Math.random() * GENERATING_MESSAGES.length)
+  );
+  const [stallVisible, setStallVisible] = useState(true);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (scrollBoxRef.current) {
+      scrollBoxRef.current.scrollTop = scrollBoxRef.current.scrollHeight;
+    }
   }, [text]);
+
+  useEffect(() => {
+    if (!stalled) return;
+    setStallMsgIndex(Math.floor(Math.random() * GENERATING_MESSAGES.length));
+    setStallVisible(true);
+    const interval = setInterval(() => {
+      setStallVisible(false);
+      setTimeout(() => {
+        setStallMsgIndex((i) => (i + 1) % GENERATING_MESSAGES.length);
+        setStallVisible(true);
+      }, 400);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [stalled]);
 
   return (
     <Box
@@ -218,7 +238,7 @@ function ThinkingPanel({ text }) {
         </Typography>
       </Box>
 
-      <Box sx={{ flex: 1, overflowY: "auto", px: 2.5, py: 2 }}>
+      <Box ref={scrollBoxRef} sx={{ flex: 1, overflowY: "auto", px: 2.5, py: 2 }}>
         <Typography
           variant="body2"
           sx={{ color: "text.secondary", lineHeight: 1.75, whiteSpace: "pre-wrap" }}
@@ -241,7 +261,21 @@ function ThinkingPanel({ text }) {
             }}
           />
         </Typography>
-        <Box ref={bottomRef} />
+        {stalled && (
+          <Typography
+            variant="body2"
+            sx={{
+              mt: 1.5,
+              fontStyle: "italic",
+              color: "text.disabled",
+              transition: "opacity 0.4s ease",
+              opacity: stallVisible ? 1 : 0,
+              letterSpacing: 0.2,
+            }}
+          >
+            {GENERATING_MESSAGES[stallMsgIndex]}
+          </Typography>
+        )}
       </Box>
     </Box>
   );
@@ -276,6 +310,8 @@ export default function ScheduleDetailPage() {
   const [aiScore, setAiScore] = useState(null);
   const [tokenUsage, setTokenUsage] = useState(null);
   const [thinkingText, setThinkingText] = useState("");
+  const [thinkingStalled, setThinkingStalled] = useState(false);
+  const stallTimerRef = useRef(null);
 
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState(null);
@@ -351,6 +387,8 @@ export default function ScheduleDetailPage() {
     setAiScore(null);
     setTokenUsage(null);
     setThinkingText("");
+    setThinkingStalled(false);
+    clearTimeout(stallTimerRef.current);
 
     try {
       const res = await fetch(`/api/schedules/${id}/generate/`, {
@@ -392,6 +430,9 @@ export default function ScheduleDetailPage() {
             console.debug("[SSE]", event.type, event);
             if (event.type === "thinking") {
               setThinkingText((prev) => prev + event.delta);
+              setThinkingStalled(false);
+              clearTimeout(stallTimerRef.current);
+              stallTimerRef.current = setTimeout(() => setThinkingStalled(true), 7500);
             } else if (event.type === "done") {
               setVisits(event.visits);
               setAiSummary(event.summary);
@@ -408,6 +449,8 @@ export default function ScheduleDetailPage() {
     } catch {
       setGenError("Could not reach the server.");
     } finally {
+      clearTimeout(stallTimerRef.current);
+      setThinkingStalled(false);
       setGenerating(false);
     }
   }
@@ -687,7 +730,7 @@ export default function ScheduleDetailPage() {
           {/* ── Right: thinking stream / placeholder / visit table ── */}
           <Box>
             {generating && thinkingText ? (
-              <ThinkingPanel text={thinkingText} />
+              <ThinkingPanel text={thinkingText} stalled={thinkingStalled} />
             ) : generating ? (
               <GeneratingPlaceholder />
             ) : (
