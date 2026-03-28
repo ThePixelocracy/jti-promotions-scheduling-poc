@@ -312,6 +312,7 @@ export default function ScheduleDetailPage() {
   const [thinkingText, setThinkingText] = useState("");
   const [thinkingStalled, setThinkingStalled] = useState(false);
   const stallTimerRef = useRef(null);
+  const generatingPanelRef = useRef(null);
 
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState(null);
@@ -379,6 +380,12 @@ export default function ScheduleDetailPage() {
       .catch((e) => setPageError(e.message || "Could not load schedule."))
       .finally(() => setLoadingPage(false));
   }, [id, logout]);
+
+  useEffect(() => {
+    if (generating) {
+      generatingPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [generating]);
 
   async function handleGenerate() {
     setGenerating(true);
@@ -729,7 +736,7 @@ export default function ScheduleDetailPage() {
           </Paper>}
 
           {/* ── Right: thinking stream / placeholder / visit table ── */}
-          <Box>
+          <Box ref={generatingPanelRef}>
             {isDraft && generating && thinkingText ? (
               <ThinkingPanel text={thinkingText} stalled={thinkingStalled} />
             ) : isDraft && generating ? (

@@ -162,3 +162,30 @@ class ScheduledVisit(models.Model):
             or self.date > self.schedule.period_end
         ):
             raise ValidationError("Visit date must fall within the schedule's period.")
+
+
+class LLMCallLog(models.Model):
+    class Status(models.TextChoices):
+        SUCCESS = "success", "Success"
+        ERROR = "error", "Error"
+
+    schedule = models.ForeignKey(
+        Schedule, on_delete=models.CASCADE, related_name="llm_call_logs"
+    )
+    called_at = models.DateTimeField(auto_now_add=True)
+    model_name = models.CharField(max_length=100)
+    optimization_goal = models.CharField(max_length=255)
+    user_prompt = models.TextField(blank=True)
+    prompt = models.JSONField()
+    raw_response = models.TextField()
+    total_tokens = models.IntegerField(null=True, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices)
+    error_message = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-called_at"]
+        verbose_name = "LLM Call Log"
+        verbose_name_plural = "LLM Call Logs"
+
+    def __str__(self):
+        return f"{self.schedule} — {self.called_at:%Y-%m-%d %H:%M} ({self.status})"

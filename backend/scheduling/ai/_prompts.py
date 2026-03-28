@@ -54,12 +54,12 @@ RULES:
 8. Target visit frequency by priority:
    Strategic = 3–4 visits/month, Prime = 2–3, BaseLine = 1–2, Developing = 1.
 9. Spread visits across the whole month — do not cluster in one week.
-10. Each promoter works exactly 5 days per week with 2 visits per working day \
+10. Each promoter works exactly 5 days per week with 2 shifts per working day \
 (morning and afternoon slots). Do not exceed this unless the user says otherwise.
-11. Each promoter should work exactly 1 Saturday and 1 Sunday across the whole \
+11. Each promoter should typically work 1 Saturday and 1 Sunday across the whole \
 schedule period (not per week). All other days must be Monday–Friday. \
 Override this only if the user explicitly requests different weekend availability.
-12. Keep each visit "reason" field to 20 words or fewer.
+12. Keep each visit "reason" field to 10 words or fewer.
 
 RESPONSE STRUCTURE — two sections in this exact order:
 

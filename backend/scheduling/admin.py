@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import PointOfSale, Promoter, Schedule, ScheduledVisit
+from .models import LLMCallLog, PointOfSale, Promoter, Schedule, ScheduledVisit
 
 
 @admin.register(PointOfSale)
@@ -62,3 +62,36 @@ class ScheduledVisitAdmin(admin.ModelAdmin):
     list_filter = ("programme_type", "action", "schedule")
     search_fields = ("pos__name", "pos__cdb_code", "promoter__last_name")
     date_hierarchy = "date"
+
+
+@admin.register(LLMCallLog)
+class LLMCallLogAdmin(admin.ModelAdmin):
+    list_display = (
+        "called_at",
+        "schedule",
+        "model_name",
+        "status",
+        "total_tokens",
+        "optimization_goal",
+    )
+    list_filter = ("status", "model_name", "schedule")
+    search_fields = ("schedule__name", "optimization_goal", "error_message")
+    readonly_fields = (
+        "called_at",
+        "schedule",
+        "model_name",
+        "optimization_goal",
+        "user_prompt",
+        "prompt",
+        "raw_response",
+        "total_tokens",
+        "status",
+        "error_message",
+    )
+    date_hierarchy = "called_at"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False

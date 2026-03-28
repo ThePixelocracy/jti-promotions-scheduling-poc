@@ -104,13 +104,25 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
                     yield {"type": "thinking", "delta": safe}
 
     except Exception as exc:
-        yield {"type": "error", "message": str(exc)}
+        yield {
+            "type": "error",
+            "message": str(exc),
+            "messages": messages,
+            "raw_response": accumulated,
+            "total_tokens": total_tokens,
+        }
         return
 
     try:
         result = _extract_json(accumulated)
     except Exception as exc:
-        yield {"type": "error", "message": f"Failed to parse AI response: {exc}"}
+        yield {
+            "type": "error",
+            "message": f"Failed to parse AI response: {exc}",
+            "messages": messages,
+            "raw_response": accumulated,
+            "total_tokens": total_tokens,
+        }
         return
 
     yield {
@@ -123,6 +135,9 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
             "completion_tokens": 0,
             "total_tokens": total_tokens,
         },
+        "messages": messages,
+        "raw_response": accumulated,
+        "total_tokens": total_tokens,
     }
 
 

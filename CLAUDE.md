@@ -59,7 +59,11 @@ jti-promotion-scheduling-poc/
 │   ├── config/                       # Django project settings, urls, wsgi, asgi
 │   ├── api/                          # Auth endpoints
 │   ├── scheduling/                   # Core domain models, views, serializers, AI
-│   │   ├── ai.py                     # Prompt builder + OpenAI-compatible LLM call
+│   │   ├── ai/                       # LLM client, prompt builder, streaming generator
+│   │   │   ├── _client.py            # OpenAI-compatible client factory
+│   │   │   ├── _prompts.py           # System prompt + domain formatters
+│   │   │   └── _generate.py          # stream_generate_schedule + blocking wrapper
+│   │   ├── views/                    # Split view modules (schedule, generate, transfer…)
 │   │   └── fixtures/initial_data.json
 │   ├── metrics/                      # POSMetrics model
 │   └── data_integration/             # CSV importers, DataSyncLog, admin Pull buttons
@@ -167,7 +171,7 @@ JWT via `djangorestframework-simplejwt`:
 - Access token: **8 hours**
 - Refresh token: **7 days**, rotation + blacklist enabled
 
-### AI schedule generation — `scheduling/ai.py`
+### AI schedule generation — `scheduling/ai/`
 
 `POST /api/schedules/{id}/generate/` accepts:
 ```json
@@ -176,12 +180,13 @@ JWT via `djangorestframework-simplejwt`:
 
 Flow:
 1. Aggregates `POSMetrics` into per-POS peak-window summaries (avg sales/interviews by time slot + day-of-week)
-2. Builds a structured prompt with schedule period, POS list, promoter list, optimization goal, and user constraints
-3. Calls the configured LLM with `response_format: json_object`
-4. Parses the response, clears existing `ScheduledVisit` records, saves new ones
-5. Returns `{ visits, summary, usage, errors }`
+2. Builds a structured prompt with schedule period, POS list, promoter list, optimization goal, and user constraints (`scheduling/ai/_prompts.py`)
+3. Streams the LLM response via OpenAI-compatible client (`scheduling/ai/_client.py`, `_generate.py`)
+4. Yields `thinking` deltas (streamed to frontend via SSE) then a `done` event with parsed visits
+5. Saves a `LLMCallLog` record (full prompt + raw response), clears existing `ScheduledVisit` records, saves new ones
+6. Returns `{ visits, summary, score, usage, errors }`
 
-`week_label` is computed from the visit date relative to `period_start`. AI reasoning is stored in the `comments` field of each `ScheduledVisit`.
+`week_label` is computed from the visit date relative to `period_start`. AI reasoning is stored in the `comments` field of each `ScheduledVisit`. Every LLM call (success or error) is logged to `LLMCallLog` and visible in Django Admin only.
 
 ### Linting
 
@@ -225,6 +230,11 @@ One promoter visit to one POS within a schedule. Central fact record.
 Key fields: `schedule`, `promoter` (nullable for Radical), `pos`, `date`, `start_time`, `end_time`, `programme_type`, `out_of_premises`, `week_label`, `action` (blank = planned), `reason`, `comments` (AI reasoning stored here), `comments_meeting`.
 
 Constraints: `end_time > start_time`, `date` within `schedule` period.
+
+#### `LLMCallLog`
+Audit log of every LLM call made during schedule generation. Admin-only (no REST API).
+
+Key fields: `schedule` (FK, cascade), `called_at` (auto), `model_name`, `optimization_goal`, `user_prompt`, `prompt` (JSONField — full messages list), `raw_response` (full accumulated text including `<thinking>` block), `total_tokens`, `status` (success/error), `error_message`.
 
 ---
 

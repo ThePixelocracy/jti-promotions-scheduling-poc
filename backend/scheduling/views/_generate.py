@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..ai import generate_schedule, stream_generate_schedule
-from ..models import Schedule
+from ..models import LLMCallLog, Schedule
 from ..serializers import ScheduledVisitSerializer
 from ._helpers import _create_visits_from_ai
 
@@ -55,6 +55,17 @@ class ScheduleGenerateView(APIView):
                 status=drf_status.HTTP_502_BAD_GATEWAY,
             )
 
+        LLMCallLog.objects.create(
+            schedule=schedule,
+            model_name=settings.OPENAI_MODEL,
+            optimization_goal=optimization_goal,
+            user_prompt=user_prompt,
+            prompt=result.get("messages", []),
+            raw_response=result.get("raw_response", ""),
+            total_tokens=result.get("total_tokens"),
+            status=LLMCallLog.Status.SUCCESS,
+        )
+
         pos_map = {p.id: p for p in schedule.included_pos.all()}
         promoter_map = {p.id: p for p in schedule.included_promoters.all()}
         created, errors = _create_visits_from_ai(
@@ -84,11 +95,37 @@ class ScheduleGenerateView(APIView):
             for event in stream_generate_schedule(
                 schedule, optimization_goal, user_prompt
             ):
-                if event["type"] in ("thinking", "error"):
+                if event["type"] == "thinking":
                     yield f"data: {json.dumps(event)}\n\n"
                     continue
 
-                # "done" — persist visits + score, then emit the SSE payload
+                if event["type"] == "error":
+                    LLMCallLog.objects.create(
+                        schedule=schedule,
+                        model_name=settings.OPENAI_MODEL,
+                        optimization_goal=optimization_goal,
+                        user_prompt=user_prompt,
+                        prompt=event.get("messages", []),
+                        raw_response=event.get("raw_response", ""),
+                        total_tokens=event.get("total_tokens"),
+                        status=LLMCallLog.Status.ERROR,
+                        error_message=event.get("message", ""),
+                    )
+                    err_payload = {"type": "error", "message": event["message"]}
+                    yield f"data: {json.dumps(err_payload)}\n\n"
+                    continue
+
+                # "done" — persist log + visits + score, then emit the SSE payload
+                LLMCallLog.objects.create(
+                    schedule=schedule,
+                    model_name=settings.OPENAI_MODEL,
+                    optimization_goal=optimization_goal,
+                    user_prompt=user_prompt,
+                    prompt=event.get("messages", []),
+                    raw_response=event.get("raw_response", ""),
+                    total_tokens=event.get("total_tokens"),
+                    status=LLMCallLog.Status.SUCCESS,
+                )
                 created, errors = _create_visits_from_ai(
                     schedule, event.get("visits", []), pos_map, promoter_map
                 )
