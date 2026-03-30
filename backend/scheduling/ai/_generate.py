@@ -68,7 +68,7 @@ def stream_generate_schedule(schedule, optimization_goal: str, user_prompt: str)
                 "content": [{"text": prompt["user"]}],
             }
         ],
-        "inferenceConfig": {"maxTokens": 8192},
+        "inferenceConfig": {"maxTokens": 16000},
     }
     if thinking_budget > 0:
         kwargs["additionalModelRequestFields"] = {

@@ -99,16 +99,6 @@ class Schedule(models.Model):
     def clean(self):
         if self.period_end < self.period_start:
             raise ValidationError("period_end must be on or after period_start.")
-        overlapping = Schedule.objects.filter(
-            period_start__lte=self.period_end,
-            period_end__gte=self.period_start,
-        )
-        if self.pk:
-            overlapping = overlapping.exclude(pk=self.pk)
-        if overlapping.exists():
-            raise ValidationError(
-                "A schedule already exists that overlaps with this period."
-            )
 
 
 class ScheduledVisit(models.Model):
